@@ -45,7 +45,7 @@ async def upload_dataset(file: UploadFile = File(...)):
         pd.errors.ParserError,
         UnicodeDecodeError
     ): 
-        # if parsing fails, returns status 400 warning
+        # if parsing fails returns status 400 warning
         logger.warning("Unable to read CSV file: %s", filename)
         raise HTTPException(
             status_code=400,
