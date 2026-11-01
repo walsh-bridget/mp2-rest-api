@@ -4,7 +4,9 @@ import logging
 from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging
+from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging, ProcessConfig, ProcessingReport
+
+from data_pipeline import create_cleaning_report, process_data, validate_dataframe
 
 setup_logging(verbose=True)
 logger = logging.getLogger(__name__)
@@ -95,3 +97,72 @@ def get_dataset(dataset_id: int, limit: int = Query(default=100, ge=1)): # defau
         "total_rows": len(df)
     }
 
+@app.post(
+    "/datasets/{dataset_id}/process",
+    response_model=ProcessingReport
+)
+def process_dataset(dataset_id: int, config: ProcessConfig):
+    """Validate and process a stored dataset using MP1 functions."""
+    # TODO: retrieve, validate, process, report, update, and return.
+    
+    # gets a copy of  saved dataset
+    df = storage.get(dataset_id)
+
+    # if ID isn't in storage, return 404
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Dataset not found.",
+        )
+
+    # convert the request to dictionary
+    settings = config.model_dump()
+
+    # check that every requested numeric column exists
+    numeric_columns = settings["validation"]["numeric_columns"]
+
+    for column in numeric_columns:
+        if column not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Numeric column '{column}' not found.",
+            )
+
+    try:
+        # validate the dataset using the requested columns
+        validated_df = validate_dataframe(
+            df,
+            required_columns=settings["validation"]["required_columns"],
+            numeric_columns=numeric_columns,
+        )
+
+        # count how many rows validation removed.
+        validation_rows_removed = len(df) - len(validated_df)
+
+        # keep a copy to compare against cleaned result
+        validated_copy = validated_df.copy()
+
+        # process the validated data using the full config
+        processed_df = process_data(validated_df, settings)
+
+        # create a report comparing before and after cleaning.
+        cleaning_report = create_cleaning_report(
+            validated_copy,
+            processed_df,
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    # save the processed data only after the steps succeeded
+    storage.update(dataset_id, processed_df)
+
+    # return the report
+    return {
+        "id": dataset_id,
+        "validation_rows_removed": validation_rows_removed,
+        "cleaning_report": cleaning_report,
+    }
