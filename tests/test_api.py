@@ -55,7 +55,7 @@ def test_process_and_retrieve(
     data = response.json()
     assert data["total_rows"] == 3
 
-    records = data["records"]
+    records = data["data"]
     pairs = [(r["student_id"], r["score"]) for r in records]
     assert pairs == [(1, 80), (2, 90), (5, 85)]
     pass

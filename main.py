@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging, ProcessConfig, ProcessingReport
+from src import DatasetInfo, DatasetStorage, HealthResponse, setup_logging, ProcessConfig, ProcessingReport, log_requests
 
 from data_pipeline import create_cleaning_report, process_data, validate_dataframe
 
@@ -12,6 +12,7 @@ setup_logging(verbose=True)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Data Processing API", version="1.0.0")
+app.middleware("http")(log_requests)
 storage = DatasetStorage()
 
 @app.get("/health", response_model=HealthResponse)
@@ -118,7 +119,7 @@ def process_dataset(dataset_id: int, config: ProcessConfig):
     # convert the request to dictionary
     settings = config.model_dump()
 
-    # check that every requested numeric column exists
+    # check that every requested numeric column exists, 400 if not
     numeric_columns = settings["validation"]["numeric_columns"]
 
     for column in numeric_columns:
@@ -159,6 +160,15 @@ def process_dataset(dataset_id: int, config: ProcessConfig):
 
     # save the processed data only after the steps succeeded
     storage.update(dataset_id, processed_df)
+
+    logger.info(
+        "Processed dataset: id=%s, validation_removed=%s, "
+        "rows_before=%s, rows_after=%s",
+        dataset_id,
+        validation_rows_removed,
+        cleaning_report["rows_before"],
+        cleaning_report["rows_after"],
+    )
 
     # return the report
     return {
